@@ -15,7 +15,7 @@ export interface Order {
   reference: string;
   status: OrderStatus;
   total_cents: number;
-  placed_at: string;
+  placed_at: string | null;
   item_count: number;
   customer: { id: number; name: string; email: string; lifetime_orders: number };
   items: OrderItem[];
