@@ -59,3 +59,8 @@ button.secondary { background: var(--surface); color: var(--text); border-color:
 form.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; display: grid; gap: 1rem; max-width: 640px; }
 form.card label { display: grid; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
 .line { display: grid; grid-template-columns: 1fr 90px auto; gap: 0.5rem; align-items: end; }
+fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 1rem; }
+form.card .alert, form.card .notice { margin-bottom: 0; }
+
+table.is-stale { opacity: 0.6; transition: opacity 0.15s; }
+.empty { text-align: center; color: var(--muted); padding: 1.5rem; }
