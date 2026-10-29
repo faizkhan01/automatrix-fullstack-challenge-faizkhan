@@ -10,6 +10,8 @@ export const ordersRouter = Router();
 
 const DEFAULT_PER_PAGE = 15;
 const MAX_PER_PAGE = 100;
+const MAX_ORDER_LINES = 50;
+const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,255}$/;
 
 const findOrderWithCustomer = (id) => Order.findByPk(id, { include: [{ model: Customer, as: "customer" }] });
 
@@ -43,10 +45,19 @@ ordersRouter.get("/:id", async (req, res) => {
 
 ordersRouter.post("/", async (req, res) => {
   const { customer_id: customerId, items } = req.body ?? {};
+  const idempotencyKey = req.get("Idempotency-Key");
 
   const v = validator();
+  v.check(
+    "idempotency_key",
+    idempotencyKey === undefined || IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey),
+    "The Idempotency-Key header must be 1 to 255 printable characters.",
+  );
   v.check("customer_id", isPositiveInt(customerId), "The customer id field is required.");
-  if (v.check("items", Array.isArray(items) && items.length > 0, "The items field is required.")) {
+  if (
+    v.check("items", Array.isArray(items) && items.length > 0, "The items field is required.") &&
+    v.check("items", items.length <= MAX_ORDER_LINES, `The items field must not have more than ${MAX_ORDER_LINES} items.`)
+  ) {
     const seen = new Set();
     items.forEach((item, i) => {
       v.check(`items.${i}.product_id`, isPositiveInt(item?.product_id), `The items.${i}.product_id field is required.`);
@@ -68,7 +79,9 @@ ordersRouter.post("/", async (req, res) => {
   v.check("items", found === productIds.length, "One or more selected products are invalid.");
   v.passOrThrow();
 
-  const order = await placeOrder(customer, items);
+  const { order, replayed } = await placeOrder(customer, items, { idempotencyKey });
 
+  // A replay answers exactly like the original request did, flagged so clients can tell.
+  if (replayed) res.set("Idempotent-Replayed", "true");
   res.status(201).json({ data: await loadOrderResource(await findOrderWithCustomer(order.id)) });
 });
