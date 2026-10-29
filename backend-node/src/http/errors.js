@@ -1,8 +1,9 @@
-import { config } from "../config.js";
+import { ConnectionError, DatabaseError } from "sequelize";
 
+/** An expected failure whose `message` is safe to show to end users. */
 export class HttpError extends Error {
-  constructor(status, message, errors = undefined) {
-    super(message);
+  constructor(status, message, errors = undefined, options = undefined) {
+    super(message, options);
     this.status = status;
     this.errors = errors;
   }
@@ -21,18 +22,41 @@ export class InsufficientStockError extends HttpError {
   }
 }
 
-// eslint-disable-next-line no-unused-vars
+export class ServiceUnavailableError extends HttpError {
+  constructor(message = "The service is temporarily unavailable. Please try again in a moment.", options = undefined) {
+    super(503, message, undefined, options);
+  }
+}
+
+// Seconds a client should wait before retrying after a 503.
+const RETRY_AFTER_SECONDS = 5;
+
+/**
+ * Responses only ever carry `{ message, errors? }` with user-safe text.
+ * SQL, driver codes and stack traces go to the server log, never to the client.
+ */
 export function errorHandler(err, req, res, next) {
+  if (res.headersSent) return next(err);
+
   if (err instanceof HttpError) {
+    if (err.status >= 500) console.error(err.cause ?? err);
+    if (err.status === 503) res.set("Retry-After", String(RETRY_AFTER_SECONDS));
     return res.status(err.status).json({ message: err.message, ...(err.errors && { errors: err.errors }) });
+  }
+
+  // Client mistakes raised by middleware (e.g. express.json on a malformed body).
+  if (err.expose && err.status >= 400 && err.status < 500) {
+    const message = err.type === "entity.parse.failed" ? "The request body must be valid JSON." : err.message;
+    return res.status(err.status).json({ message });
   }
 
   console.error(err);
 
-  // Verbose errors outside production make debugging easier.
-  res.status(500).json(
-    config.env === "production"
-      ? { message: "Server Error" }
-      : { message: err.message, exception: err.name, sql: err.sql, stack: err.stack?.split("\n") },
-  );
+  if (err instanceof DatabaseError || err instanceof ConnectionError) {
+    const unavailable = new ServiceUnavailableError();
+    res.set("Retry-After", String(RETRY_AFTER_SECONDS));
+    return res.status(unavailable.status).json({ message: unavailable.message });
+  }
+
+  res.status(500).json({ message: "Something went wrong on our side. Please try again." });
 }
