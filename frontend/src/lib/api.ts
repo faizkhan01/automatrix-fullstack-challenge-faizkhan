@@ -18,15 +18,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export interface OrderFilters {
   status?: OrderStatus | "";
   search?: string;
+  page?: number;
 }
 
-export function fetchOrders(filters: OrderFilters = {}): Promise<Paginated<Order>> {
+export function fetchOrders(filters: OrderFilters = {}, signal?: AbortSignal): Promise<Paginated<Order>> {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
   if (filters.search) params.set("search", filters.search);
+  if (filters.page) params.set("page", String(filters.page));
 
   const query = params.toString();
-  return request(`/orders${query ? `?${query}` : ""}`);
+  return request(`/orders${query ? `?${query}` : ""}`, { signal });
 }
 
 export function fetchCustomers(): Promise<{ data: Customer[] }> {
