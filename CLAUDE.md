@@ -18,7 +18,10 @@ Internal ops dashboard to browse and place customer orders.
    Details go to the server log only.
 5. Unrecoverable DB failures → **503**. Validation → **422**. Not found → **404**.
 6. Writes that touch more than one row (orders, items, stock, events) run in **one transaction**,
-   all-or-nothing. Transient errors (deadlock 1213, lock wait timeout 1205) retry the **whole** transaction.
+   all-or-nothing. Transient errors (deadlock 1213, lock wait timeout 1205) retry the **whole** transaction
+   (`db/transaction.js` → `withTransaction`).
+7. `POST /api/orders` honours an `Idempotency-Key` header (unique per customer). The form sends one key per
+   attempt: reused on an unchanged retry, rotated on edit or success.
 
 ## Commands (Docker stack is already running: `docker compose --profile node up`)
 
@@ -32,6 +35,12 @@ curl -s -XPOST localhost:8000/api/orders -H 'X-Simulate-Fault: table_full' ...  
 ```
 
 Always run the real test suites before committing. Don't rely on reasoning alone.
+
+Gotchas:
+- `node --watch` on the bind mount can miss edits. Before trusting a live `curl`, run
+  `docker compose restart backend-node` (it re-seeds the DB). vitest always loads fresh code.
+- There are no migrations: the schema comes from `sequelize.sync({ force: true })` (seed + tests). After a model change,
+  re-seed the dev DB (`docker compose exec -T backend-node npm run db:seed`).
 
 ## Backend conventions (`backend-node/src`)
 
