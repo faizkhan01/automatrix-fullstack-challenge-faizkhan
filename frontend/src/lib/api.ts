@@ -83,10 +83,19 @@ export function fetchProducts(signal?: AbortSignal): Promise<{ data: Product[] }
   return request("/products", { signal });
 }
 
-export function createOrder(order: NewOrder, options: { simulateFault?: string } = {}): Promise<{ data: Order }> {
+export interface CreateOrderOptions {
+  /** Sending the same key again returns the original order instead of placing a duplicate. */
+  idempotencyKey?: string;
+  simulateFault?: string;
+}
+
+export function createOrder(order: NewOrder, options: CreateOrderOptions = {}): Promise<{ data: Order }> {
   return request("/orders", {
     method: "POST",
     body: JSON.stringify(order),
-    headers: options.simulateFault ? { "X-Simulate-Fault": options.simulateFault } : {},
+    headers: {
+      ...(options.idempotencyKey && { "Idempotency-Key": options.idempotencyKey }),
+      ...(options.simulateFault && { "X-Simulate-Fault": options.simulateFault }),
+    },
   });
 }

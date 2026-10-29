@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, createOrder, fetchCustomers, fetchProducts } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import { newIdempotencyKey } from "@/lib/idempotency";
 import type { Customer, Product } from "@/lib/types";
 
 interface Line {
@@ -31,6 +32,12 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
   const [success, setSuccess] = useState<string | null>(null);
   // State updates are async, so a ref is what reliably blocks a second submit in the same tick.
   const submittingRef = useRef(false);
+  // Reused when the same, unchanged order is retried, so a request whose response was lost
+  // can't be placed twice. Any edit or a confirmed success starts a new attempt.
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const startNewAttempt = () => {
+    idempotencyKeyRef.current = null;
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -47,8 +54,18 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
     return () => controller.abort();
   }, []);
 
+  function changeCustomer(id: string) {
+    startNewAttempt();
+    setCustomerId(id);
+  }
+
+  function changeLines(update: (current: Line[]) => Line[]) {
+    startNewAttempt();
+    setLines(update);
+  }
+
   function updateLine(key: number, patch: Partial<Line>) {
-    setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)));
+    changeLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)));
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -56,6 +73,7 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
     if (submittingRef.current) return;
 
     submittingRef.current = true;
+    idempotencyKeyRef.current ??= newIdempotencyKey();
     setSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -66,10 +84,11 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
           customer_id: Number(customerId),
           items: lines.map((line) => ({ product_id: Number(line.productId), quantity: line.quantity })),
         },
-        { simulateFault },
+        { idempotencyKey: idempotencyKeyRef.current, simulateFault },
       );
 
       setSuccess(`Order ${res.data.reference} placed for ${formatMoney(res.data.total_cents)}.`);
+      startNewAttempt();
       setCustomerId("");
       setLines([emptyLine()]);
       // Stock counts in the product list are stale now; a failed refresh isn't worth an error.
@@ -93,7 +112,7 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
       <fieldset className="plain" disabled={submitting}>
         <label>
           Customer
-          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required>
+          <select value={customerId} onChange={(e) => changeCustomer(e.target.value)} required>
             <option value="">Select a customer…</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
@@ -133,7 +152,7 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
               <button
                 type="button"
                 className="secondary"
-                onClick={() => setLines((current) => current.filter((l) => l.key !== line.key))}
+                onClick={() => changeLines((current) => current.filter((l) => l.key !== line.key))}
                 disabled={lines.length === 1}
               >
                 Remove
@@ -143,7 +162,7 @@ export default function NewOrderForm({ simulateFault }: { simulateFault?: string
         })}
 
         <div>
-          <button type="button" className="secondary" onClick={() => setLines((current) => [...current, emptyLine()])}>
+          <button type="button" className="secondary" onClick={() => changeLines((current) => [...current, emptyLine()])}>
             Add line
           </button>
         </div>
