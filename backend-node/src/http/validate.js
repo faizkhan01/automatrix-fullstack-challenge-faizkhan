@@ -19,3 +19,9 @@ export function validator() {
 }
 
 export const isPositiveInt = (value) => Number.isInteger(value) && value > 0;
+
+/** Parses a query-string value as a positive integer, or returns `fallback`. */
+export function positiveIntOr(value, fallback) {
+  const parsed = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  return isPositiveInt(parsed) ? parsed : fallback;
+}

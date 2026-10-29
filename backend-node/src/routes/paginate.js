@@ -2,7 +2,13 @@
 export function paginated(req, data, { page, perPage, total }) {
   const lastPage = Math.max(1, Math.ceil(total / perPage));
   const base = `${req.protocol}://${req.get("host")}${req.baseUrl}${req.path === "/" ? "" : req.path}`;
-  const url = (p) => `${base}?page=${p}`;
+  // Keep the active filters (status, search, per_page) so following a link can't widen the result set.
+  const query = new URL(req.originalUrl, "http://localhost").searchParams;
+  const url = (p) => {
+    query.set("page", String(p));
+    return `${base}?${query}`;
+  };
+  const isEmpty = data.length === 0;
 
   return {
     data,
@@ -17,8 +23,8 @@ export function paginated(req, data, { page, perPage, total }) {
       last_page: lastPage,
       per_page: perPage,
       total,
-      from: total === 0 ? null : (page - 1) * perPage + 1,
-      to: total === 0 ? null : Math.min(page * perPage, total),
+      from: isEmpty ? null : (page - 1) * perPage + 1,
+      to: isEmpty ? null : (page - 1) * perPage + data.length,
     },
   };
 }

@@ -1,51 +1,44 @@
 import { Router } from "express";
-import { Op } from "sequelize";
-import { isPositiveInt, validator } from "../http/validate.js";
+import { isPositiveInt, positiveIntOr, validator } from "../http/validate.js";
 import { Customer, Order, ORDER_STATUSES, Product } from "../models/index.js";
-import { orderResource } from "../serializers/orderResource.js";
+import { listOrders } from "../services/listOrders.js";
+import { loadOrderResource } from "../services/loadOrderResources.js";
 import { placeOrder } from "../services/placeOrder.js";
 import { paginated } from "./paginate.js";
 
 export const ordersRouter = Router();
 
-ordersRouter.get("/", async (req, res) => {
-  const { status, search } = req.query;
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const perPage = Number(req.query.per_page) || 15;
+const DEFAULT_PER_PAGE = 15;
+const MAX_PER_PAGE = 100;
 
+const findOrderWithCustomer = (id) => Order.findByPk(id, { include: [{ model: Customer, as: "customer" }] });
+
+ordersRouter.get("/", async (req, res) => {
+  const { status = "" } = req.query;
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : req.query.search;
+  const page = positiveIntOr(req.query.page, 1);
+  // Clamped rather than rejected, so an oversized page can't turn into an unbounded query.
+  const perPage = Math.min(positiveIntOr(req.query.per_page, DEFAULT_PER_PAGE), MAX_PER_PAGE);
+
+  // Query values can be arrays (?status=a&status=b), so check types before using them.
   const v = validator();
-  v.check("status", !status || ORDER_STATUSES.includes(status), "The selected status is invalid.");
-  v.check("search", !search || String(search).length <= 100, "The search field must not be greater than 100 characters.");
+  v.check("status", status === "" || ORDER_STATUSES.includes(status), "The selected status is invalid.");
+  if (v.check("search", search === undefined || typeof search === "string", "The search field must be a string.")) {
+    v.check("search", !search || search.length <= 100, "The search field must not be greater than 100 characters.");
+  }
   v.passOrThrow();
 
-  let where = {};
-  if (status) where.status = status;
+  const { data, total } = await listOrders({ status, search, page, perPage });
 
-  if (search) {
-    const customers = await Customer.findAll({ attributes: ["id"], where: { name: { [Op.like]: `%${search}%` } } });
-
-    where = {
-      [Op.or]: [{ reference: { [Op.like]: `%${search}%` } }, { customerId: customers.map((c) => c.id) }],
-    };
-  }
-
-  const { rows, count } = await Order.findAndCountAll({
-    where,
-    order: [["placedAt", "DESC"]],
-    limit: perPage,
-    offset: (page - 1) * perPage,
-  });
-
-  const data = await Promise.all(rows.map(orderResource));
-
-  res.json(paginated(req, data, { page, perPage, total: count }));
+  res.json(paginated(req, data, { page, perPage, total }));
 });
 
 ordersRouter.get("/:id", async (req, res) => {
-  const order = await Order.findByPk(req.params.id);
+  const id = positiveIntOr(req.params.id, null);
+  const order = id && (await findOrderWithCustomer(id));
   if (!order) return res.status(404).json({ message: "Order not found." });
 
-  res.json({ data: await orderResource(order) });
+  res.json({ data: await loadOrderResource(order) });
 });
 
 ordersRouter.post("/", async (req, res) => {
@@ -77,5 +70,5 @@ ordersRouter.post("/", async (req, res) => {
 
   const order = await placeOrder(customer, items);
 
-  res.status(201).json({ data: await orderResource(order) });
+  res.status(201).json({ data: await loadOrderResource(await findOrderWithCustomer(order.id)) });
 });
